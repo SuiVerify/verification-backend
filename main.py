@@ -91,7 +91,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000", 
+        "http://localhost:3000",
+        "https://api.suiverify.xyz",
         "http://localhost:5173",
         "http://localhost:5175",
         "https://13.232.254.187",  # Your server IP
