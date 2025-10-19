@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 import logging
 import redis
+from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
 
@@ -119,74 +120,112 @@ class RedisService:
             "error": self.connection_error
         }
     
-    def _create_evidence_hash(self, aadhaar_number: str, dob: str, phone_number: str) -> str:
-        """Create SHA256 hash from OCR data"""
+    # OCR hash creation removed - evidence hash will be created in Rust enclave
+    
+    def _create_verification_payload(self, document_type: str, extracted_data: dict, user_corrections: dict = None) -> dict:
+        """Create payload for government API verification (without @entity - handled in Rust)"""
         try:
-            # Combine the three fields
-            combined_data = f"{aadhaar_number}{dob}{phone_number}"
+            # Use corrected data if provided, otherwise use extracted data
+            final_data = user_corrections if user_corrections else extracted_data
             
-            # Create SHA256 hash
-            hash_object = hashlib.sha256(combined_data.encode('utf-8'))
-            evidence_hash = hash_object.hexdigest()
-            
-            logger.info(f"Evidence hash created for user data")
-            return evidence_hash
-            
+            if document_type == "pan":
+                return {
+                    "pan": final_data.get('pan'),
+                    "name_as_per_pan": final_data.get('name'),
+                    "date_of_birth": final_data.get('date_of_birth'),
+                    "consent": "Y",
+                    "reason": "For onboarding customers"
+                }
+            else:
+                raise ValueError(f"Unsupported document type: {document_type}. Only 'pan' is supported.")
+                
         except Exception as e:
-            logger.error(f"Failed to create evidence hash: {e}")
+            logger.error(f"Failed to create verification payload: {e}")
             raise
     
-    async def send_verification_data(self, user_data: dict) -> bool:
+    async def send_verification_request(self, user_wallet: str, did_id: str, document_type: str, verification_data: dict, extracted_data: dict = None, user_corrections: dict = None) -> bool:
         """
-        Send verification data to Redis Stream
+        Send verification request to Redis Stream for enclave processing
         
         Args:
-            user_data: Dictionary containing user verification data
-            Expected fields: wallet_address, did, is_verified, aadhaar_number, date_of_birth, phone_number
+            user_wallet: User's wallet address
+            did_id: DID identifier (0=PAN covers 18+/citizenship/personal_id)
+            document_type: Type of document ("pan" only)
+            verification_data: Final verification data to be sent to government API
+            extracted_data: Original OCR extracted data (not used for hash - done in Rust)
+            user_corrections: User corrections to OCR data
         """
         try:
-            # Create evidence hash from OCR data
-            evidence_hash = self._create_evidence_hash(
-                aadhaar_number=user_data.get('aadhaar_number', ''),
-                dob=user_data.get('date_of_birth', ''),
-                phone_number=user_data.get('phone_number', '')
-            )
+            # Create verification payload for government API (no @entity - handled in Rust)
+            document_data = self._create_verification_payload(document_type, verification_data, user_corrections)
             
-            # Prepare message payload (same format as Kafka)
+            # Prepare verification request message (no ocr_hash - evidence hash created in Rust)
             verification_message = {
-                "user_wallet": user_data.get('wallet_address'),
-                "did_id": str(user_data.get('did', 0)),
-                "result": "verified" if user_data.get('is_verified') == 1 else "unverified",
-                "evidence_hash": evidence_hash,
-                "verified_at": datetime.now().isoformat()
+                "user_wallet": user_wallet,
+                "did_id": str(did_id),
+                "verification_type": document_type,
+                "document_data": document_data,
+                "timestamp": datetime.now().isoformat(),
+                "status": "pending_verification"  # NOT "verified"
             }
             
-            logger.info(f"Sending verification data to Redis")
-            logger.info(f"Message: {json.dumps(verification_message, indent=2)}")
+            logger.info(f"Sending PAN verification request to Redis for enclave processing")
+            logger.info(f"Request: {json.dumps(verification_message, indent=2)}")
             
             # Send to Redis Stream
             success = await self._send_to_redis_stream(verification_message)
             
             if success:
-                logger.info("✅ Message successfully sent to Redis")
+                logger.info("✅ PAN verification request successfully sent to Redis")
                 return True
             else:
-                logger.error("❌ Failed to send message to Redis")
+                logger.error("❌ Failed to send PAN verification request to Redis")
                 return False
                 
         except Exception as e:
-            logger.error(f"Failed to send verification data: {e}")
+            logger.error(f"Failed to send verification request: {e}")
             return False
+    
+    async def send_verification_data(self, user_data: dict) -> bool:
+        """
+        DEPRECATED: Legacy method for backward compatibility
+        Use send_verification_request instead
+        """
+        logger.warning("send_verification_data is deprecated. Use send_verification_request instead.")
+        
+        # Convert legacy format to new PAN format
+        return await self.send_verification_request(
+            user_wallet=user_data.get('wallet_address'),
+            did_id=user_data.get('did', 0),
+            document_type="pan",  # Changed to PAN for all verifications
+            verification_data={
+                'pan': user_data.get('pan', user_data.get('aadhaar_number')),  # Use PAN or fallback to aadhaar
+                'name': user_data.get('full_name'),
+                'date_of_birth': user_data.get('date_of_birth'),
+                'phone_number': user_data.get('phone_number')
+            },
+            extracted_data=user_data
+        )
     
     async def _send_to_redis_stream(self, verification_message: dict) -> bool:
         """Send message to Redis Stream"""
         try:
             client = self._get_redis_client()
             
+            # Flatten the message for Redis stream (all values must be strings)
+            flattened_message = {}
+            for key, value in verification_message.items():
+                if isinstance(value, dict):
+                    # Convert nested dict to JSON string
+                    flattened_message[key] = json.dumps(value)
+                else:
+                    # Convert other types to string
+                    flattened_message[key] = str(value)
+            
             # Add message to Redis Stream with automatic ID generation
             stream_id = client.xadd(
                 self.stream_name,
-                verification_message,
+                flattened_message,
                 maxlen=self.max_stream_length  # Keep only last N messages
             )
             

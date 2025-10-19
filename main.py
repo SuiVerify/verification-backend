@@ -13,10 +13,11 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 
-from app.routers import aadhar, face, otp, user, kyc, encryption, credentials
+from app.routers import aadhar, face, user, kyc, encryption, credentials
+# from app.routers import otp  # OTP service commented out
 from app.services.ocr_service import OCRService
 from app.services.face_recognition_service import get_face_recognition_service
-from app.services.otp_service import OTPService
+# from app.services.otp_service import OTPService  # OTP service commented out
 from app.services.user_service import get_user_service
 from app.services.encryption_service import encryption_service
 from app.services.redis_service import get_redis_service
@@ -29,12 +30,12 @@ logger = logging.getLogger(__name__)
 # Global services
 ocr_service = None
 face_recognition_service = None
-otp_service = None
+# otp_service = None  # OTP service commented out
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global ocr_service, face_recognition_service, otp_service
+    global ocr_service, face_recognition_service  # , otp_service  # OTP service commented out
     
     logger.info("Starting SuiVerify System with MongoDB integration...")
     
@@ -53,7 +54,7 @@ async def lifespan(app: FastAPI):
     # Initialize services
     ocr_service = OCRService()
     face_recognition_service = get_face_recognition_service()
-    otp_service = OTPService()
+    # otp_service = OTPService()  # OTP service commented out
     
     # Test Redis connection
     redis_service = get_redis_service()
@@ -110,7 +111,7 @@ app.include_router(user.router, prefix="/api", tags=["User Management"])
 app.include_router(kyc.router, prefix="/api", tags=["KYC Verification"])
 app.include_router(aadhar.router, prefix="/api/aadhaar", tags=["Aadhaar OCR"])
 app.include_router(face.router, prefix="/api/face", tags=["Face Recognition"])
-app.include_router(otp.router, prefix="/api/otp", tags=["OTP Verification"])
+# app.include_router(otp.router, prefix="/api/otp", tags=["OTP Verification"])  # OTP service commented out
 app.include_router(encryption.router, prefix="/api", tags=["Encryption Metadata"])
 app.include_router(credentials.router, prefix="/api", tags=["Credentials Management"])
 
@@ -130,7 +131,7 @@ async def root():
             "user_management": "ready",
             "ocr": "ready",
             "face_recognition": "ready", 
-            "otp": "ready",
+            # "otp": "ready",  # OTP service commented out
             "encryption_metadata": "ready",
             "redis": redis_status
         }
@@ -138,7 +139,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
-    global ocr_service, face_recognition_service, otp_service
+    global ocr_service, face_recognition_service  # , otp_service  # OTP service commented out
     
     health_status = {
         "status": "healthy",
@@ -163,14 +164,14 @@ async def health_check():
     except Exception as e:
         health_status["services"]["face"] = f"error: {str(e)}"
     
-    # Check OTP service
-    try:
-        if otp_service:
-            health_status["services"]["otp"] = "healthy"
-        else:
-            health_status["services"]["otp"] = "not_initialized"
-    except Exception as e:
-        health_status["services"]["otp"] = f"error: {str(e)}"
+    # Check OTP service - COMMENTED OUT
+    # try:
+    #     if otp_service:
+    #         health_status["services"]["otp"] = "healthy"
+    #     else:
+    #         health_status["services"]["otp"] = "not_initialized"
+    # except Exception as e:
+    #     health_status["services"]["otp"] = f"error: {str(e)}"
     
     # Check Redis
     try:
@@ -204,11 +205,11 @@ def get_face_service():  # FIXED FUNCTION NAME
         raise HTTPException(status_code=503, detail="Face recognition service not available")
     return face_recognition_service
 
-def get_otp_service_dependency():  # RENAMED TO AVOID CONFLICT
-    global otp_service
-    if not otp_service:
-        raise HTTPException(status_code=503, detail="OTP service not available")
-    return otp_service
+# def get_otp_service_dependency():  # RENAMED TO AVOID CONFLICT - OTP service commented out
+#     global otp_service
+#     if not otp_service:
+#         raise HTTPException(status_code=503, detail="OTP service not available")
+#     return otp_service
 
 if __name__ == "__main__":
     # Check if SSL certificates exist for direct SSL mode

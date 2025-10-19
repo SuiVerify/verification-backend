@@ -194,12 +194,16 @@ class KafkaService:
     
     async def send_verification_data(self, user_data: dict) -> bool:
         """
-        Send verification data to Kafka topic
+        DEPRECATED: Legacy method for backward compatibility
+        
+        This method sends premature verification results which is incorrect.
+        The new architecture should use Redis streams for verification requests.
         
         Args:
             user_data: Dictionary containing user verification data
             Expected fields: wallet_address, did, is_verified, aadhaar_number, date_of_birth, phone_number
         """
+        logger.warning("send_verification_data is deprecated. Use Redis streams for verification requests instead.")
         try:
             # Create evidence hash from OCR data
             evidence_hash = self._create_evidence_hash(

@@ -1,18 +1,26 @@
-from fastapi import APIRouter, HTTPException, Depends, Form
-from app.models.schemas import APIResponse, OTPRequest, OTPVerification
-from app.services.otp_service import get_otp_service, OTPService
-from app.services.user_service import get_user_service, UserService
-from app.services.redis_service import get_redis_service, RedisService
-from app.models.user import VerificationLog, UserUpdate
-import logging
+# OTP SERVICE COMMENTED OUT - All OTP functionality disabled
+# 
+# from fastapi import APIRouter, HTTPException, Depends, Form
+# from app.models.schemas import APIResponse, OTPRequest, OTPVerification
+# from app.services.otp_service import get_otp_service, OTPService
+# from app.services.user_service import get_user_service, UserService
+# from app.services.redis_service import get_redis_service, RedisService
+# from app.models.user import VerificationLog, UserUpdate
+# import logging
 
 # Configure logging
+import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# OTP router disabled
+from fastapi import APIRouter
 router = APIRouter()
 
-@router.post("/generate-otp", response_model=APIResponse)
+# All OTP endpoints commented out below:
+
+"""
+# @router.post("/generate-otp", response_model=APIResponse)
 async def generate_otp(
     phone: str = Form(...),
     otp_service: OTPService = Depends(get_otp_service)
@@ -144,9 +152,9 @@ async def verify_otp(
         
         logger.info(f"Found existing user: {existing_user.full_name}")
         
-        # Update user verification status, DID, and wallet address
+        # Update user DID and wallet address (do NOT set as verified yet)
         update_data = UserUpdate(
-            is_verified=1,  # Mark as fully verified
+            is_verified=0,  # Do NOT mark as verified - pending government verification
             did=did,  # Set DID from frontend
             wallet_address=wallet_address  # Update with correct wallet address from frontend
         )
@@ -162,23 +170,29 @@ async def verify_otp(
         
         logger.info(f"User verification completed successfully")
         
-        # Send verification data to Redis after successful verification
+        # Send verification request to Redis for enclave processing
         redis_sent = False
         try:
-            redis_data = {
-                'wallet_address': updated_user.wallet_address,
-                'did': updated_user.did,
-                'is_verified': updated_user.is_verified,
-                'aadhaar_number': updated_user.aadhaar_number,
+            # Prepare verification data for PAN government API
+            verification_data = {
+                'pan': updated_user.aadhaar_number,  # Use aadhaar_number as PAN for now
+                'name': updated_user.full_name,
                 'date_of_birth': updated_user.date_of_birth,
                 'phone_number': updated_user.phone_number
             }
             
-            redis_sent = await redis_service.send_verification_data(redis_data)
+            # Send PAN verification request (not verification result)
+            redis_sent = await redis_service.send_verification_request(
+                user_wallet=updated_user.wallet_address,
+                did_id=updated_user.did,
+                document_type="pan",  # PAN verification for all flows
+                verification_data=verification_data,
+                extracted_data=verification_data  # Same as verification_data in this case
+            )
             if redis_sent:
-                logger.info(f"Verification data sent to Redis successfully for user: {updated_user.wallet_address}")
+                logger.info(f"Verification request sent to enclave successfully for user: {updated_user.wallet_address}")
             else:
-                logger.warning(f"Failed to send verification data to Redis for user: {updated_user.wallet_address}")
+                logger.warning(f"Failed to send verification request to enclave for user: {updated_user.wallet_address}")
                 
         except Exception as redis_error:
             logger.error(f"Redis error (non-blocking): {redis_error}")
@@ -186,13 +200,13 @@ async def verify_otp(
         
         return APIResponse(
             success=True,
-            message="OTP verified successfully! User is now fully verified.",
+            message="OTP verified successfully! PAN verification request sent to government APIs.",
             data={
                 'phone': phone_clean,
                 'wallet_address': existing_user.wallet_address,
-                'verification_status': 'FULLY_VERIFIED',
+                'verification_status': 'PENDING_GOVERNMENT_VERIFICATION',
                 'otp_verified': True,
-                'user_verified': True,
+                'user_verified': False,  # Not verified until government APIs confirm
                 'redis_sent': redis_sent,
                 'user_data': {
                     'wallet_address': updated_user.wallet_address,
@@ -312,3 +326,6 @@ async def resend_otp(
             status_code=500,
             detail=f"Error resending OTP: {str(e)}"
         )
+"""
+
+# OTP service completely disabled - all endpoints above are commented out
