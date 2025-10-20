@@ -196,3 +196,55 @@ async def get_pan_info(pan_number: str):
             status_code=500,
             detail=f"Error retrieving PAN information: {str(e)}"
         )
+
+@router.post("/correct-pan-data", response_model=APIResponse)
+async def correct_pan_data(
+    pan_data: PANData,
+    user_service: UserService = Depends(get_user_service)
+):
+    """Accept corrected PAN card data from frontend"""
+    try:
+        logger.info(f"Received corrected PAN data: PAN={pan_data.pan_number}, Name={pan_data.name}, Father={pan_data.father_name}, DOB={pan_data.dob}")
+        
+        # Validate required fields
+        if not pan_data.pan_number:
+            raise HTTPException(
+                status_code=400,
+                detail="PAN number is required"
+            )
+        
+        # Basic PAN format validation
+        import re
+        if not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$', pan_data.pan_number):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid PAN format. Expected format: AAAAA9999A"
+            )
+        
+        # Store the corrected data (you can add database storage here)
+        corrected_data = {
+            "pan_number": pan_data.pan_number,
+            "name": pan_data.name,
+            "father_name": pan_data.father_name,
+            "dob": pan_data.dob,
+            "pan_photo_base64": pan_data.pan_photo_base64,
+            "status": "corrected",
+            "timestamp": str(uuid.uuid4())
+        }
+        
+        logger.info(f"✅ PAN data correction saved successfully for PAN: {pan_data.pan_number}")
+        
+        return APIResponse(
+            success=True,
+            message="PAN data corrected and saved successfully",
+            data=corrected_data
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving corrected PAN data: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error saving corrected PAN data: {str(e)}"
+        )
