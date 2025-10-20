@@ -63,14 +63,13 @@ async def test_redis_integration():
     }
     
     success = await redis_service.send_verification_request(
-        user_wallet="0x1234567890abcdef",
+        user_wallet="0x812bacb619f60a09d4fd01841f37f141be40ecc2d2892023df8c3dd9bcb73ec4",
         did_id=0,
         document_type="pan",
         verification_data=test_data,
         extracted_data=test_data,
         user_corrections=user_corrections
     )
-    
     if success:
         print("✅ Verification request sent successfully!")
         

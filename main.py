@@ -13,7 +13,7 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 
-from app.routers import aadhar, face, user, kyc, encryption, credentials
+from app.routers import aadhar, face, user, kyc, encryption, credentials, pan
 # from app.routers import otp  # OTP service commented out
 from app.services.ocr_service import OCRService
 from app.services.face_recognition_service import get_face_recognition_service
@@ -110,6 +110,7 @@ app.add_middleware(
 app.include_router(user.router, prefix="/api", tags=["User Management"])
 app.include_router(kyc.router, prefix="/api", tags=["KYC Verification"])
 app.include_router(aadhar.router, prefix="/api/aadhaar", tags=["Aadhaar OCR"])
+app.include_router(pan.router, prefix="/api/pan", tags=["PAN Card OCR"])
 app.include_router(face.router, prefix="/api/face", tags=["Face Recognition"])
 # app.include_router(otp.router, prefix="/api/otp", tags=["OTP Verification"])  # OTP service commented out
 app.include_router(encryption.router, prefix="/api", tags=["Encryption Metadata"])
@@ -129,7 +130,8 @@ async def root():
         "services": {
             "mongodb": "connected",
             "user_management": "ready",
-            "ocr": "ready",
+            "aadhaar_ocr": "ready",
+            "pan_ocr": "ready",
             "face_recognition": "ready", 
             # "otp": "ready",  # OTP service commented out
             "encryption_metadata": "ready",
