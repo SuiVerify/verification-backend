@@ -61,23 +61,31 @@ def test_pan_face_verification(pan_card_path: str, live_image_path: str):
         if response.status_code == 200:
             result = response.json()
             
-            print("✅ Verification Successful!")
+            data = result.get('data', {})
+            
+            # Get verification status from API
+            verification_status = data.get('verification_status', 'UNKNOWN')
+            verified = data.get('verified', False)
+            confidence = data.get('confidence', 0)
+            face_distance = data.get('face_distance', 0)
+            threshold = data.get('threshold', 60)
+            detection_method = data.get('detection_method', 'N/A')
+            
+            # Display main verification result prominently
+            if verification_status == 'SUCCESS' and verified:
+                print("✅ VERIFICATION SUCCESS!")
+            else:
+                print("❌ VERIFICATION FAILED!")
+            
             print(f"\n{'─'*60}")
             print(f"📊 Results:")
             print(f"{'─'*60}")
             
-            data = result.get('data', {})
-            
-            match = data.get('match', False)
-            confidence = data.get('confidence', 0)
-            face_distance = data.get('face_distance', 0)
-            detection_method = data.get('detection_method', 'N/A')
-            
-            print(f"🎯 Match: {'✅ YES' if match else '❌ NO'}")
-            print(f"📈 Confidence: {confidence}%")
+            print(f"🎯 Status: {verification_status}")
+            print(f"📈 Confidence: {confidence}% (Threshold: {threshold}%)")
             print(f"📏 Face Distance: {face_distance}")
             print(f"🔧 Detection Method: {detection_method}")
-            print(f"\n💬 Message: {data.get('message', 'N/A')}")
+            print(f"\n💬 Message: {result.get('message', 'N/A')}")
             
             # Show validation details
             validation = data.get('validation', {})
