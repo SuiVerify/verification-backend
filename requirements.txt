@@ -4,7 +4,7 @@ python-multipart==0.0.6
 pillow>=10.0.0
 opencv-python==4.8.1.78
 pytesseract>=0.3.10
-numpy>=1.24.0,<2.0.0
+numpy==1.26.4
 pydantic>=2.0.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
@@ -13,9 +13,6 @@ requests==2.31.0
 aiofiles>=0.8.0,<24.0.0
 twilio>=7.0.0,<10.0.0
 python-dotenv>=0.19.0
-deepface>=0.0.79,<1.0.0
-tensorflow>=2.16.0
-tf-keras>=2.16.0
 
 # MongoDB dependencies
 motor>=2.5.0,<4.0.0
@@ -25,7 +22,7 @@ dnspython>=2.0.0,<3.0.0
 # HTTP client
 httpx>=0.24.0,<1.0.0
 
-# Redis for message queuing (version 5.0.0 supports Redis 5.0 to 7.4)
+# Redis for message queuing
 redis==5.0.0
 
 # Typing extensions for Python compatibility
@@ -33,3 +30,9 @@ typing_extensions>=4.6.0
 
 # Fix for OpenSSL 1.0.2k compatibility
 urllib3<2.0.0
+
+# Note: TensorFlow and DeepFace are commented out due to compatibility issues
+# Uncomment and test separately if needed:
+# deepface>=0.0.75,<0.0.80
+# tensorflow>=2.13.0,<2.16.0
+# tf-keras>=2.13.0,<2.16.0
