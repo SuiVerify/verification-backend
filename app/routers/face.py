@@ -18,6 +18,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _sanitize_for_serialization(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    try:
+        import numpy as _np
+    except Exception:
+        _np = None
+
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_serialization(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_serialization(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_serialization(v) for v in obj)
+    # numpy types
+    if _np is not None:
+        if isinstance(obj, _np.generic):
+            # convert numpy scalar to Python scalar
+            return obj.item()
+        if isinstance(obj, _np.ndarray):
+            return obj.tolist()
+    # default
+    return obj
+
 class FaceVerificationRequest(BaseModel):
     aadhaar_photo_base64: str
     live_photo_base64: str
@@ -219,22 +245,27 @@ async def verify_pan_face_with_yolo(
         
         logger.info(f"✅ Face verification complete: Match={is_match}, Confidence={confidence:.1f}%, Distance={face_distance:.3f}")
         
+        # Prepare and sanitize detailed result
+        result_data = {
+            'match': bool(is_match),
+            'confidence': float(round(float(confidence), 1)),
+            'face_distance': float(round(float(face_distance), 3)),
+            'detection_method': detection_method,
+            'message': comparison_result.get('message'),
+            'pan_photo_extracted': True,
+            'validation': {
+                'pan_photo': pan_validation,
+                'live_image': live_validation
+            }
+        }
+
+        sanitized = _sanitize_for_serialization(result_data)
+
         # Return detailed result
         return APIResponse(
             success=True,
-            message=comparison_result['message'],
-            data={
-                'match': is_match,
-                'confidence': round(confidence, 1),
-                'face_distance': round(face_distance, 3),
-                'detection_method': detection_method,
-                'message': comparison_result['message'],
-                'pan_photo_extracted': True,
-                'validation': {
-                    'pan_photo': pan_validation,
-                    'live_image': live_validation
-                }
-            }
+            message=comparison_result.get('message', ''),
+            data=sanitized
         )
         
     except HTTPException:
