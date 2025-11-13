@@ -160,20 +160,25 @@ class YOLOFaceService:
             distance = face_recognition.face_distance([encoding1], encoding2)[0]
             
             # Check if faces match (distance < tolerance means match)
-            is_match = distance <= tolerance
-            
+            is_match = bool(distance <= tolerance)
+
             # Convert distance to confidence percentage (inverse relationship)
             # Distance 0 = 100% confidence, Distance 1 = 0% confidence
-            confidence = max(0, (1 - distance) * 100)
-            
-            message = f"Face {'match' if is_match else 'mismatch'} detected with {confidence:.1f}% confidence (distance: {distance:.3f})"
-            
-            logger.info(f"Face comparison - Match: {is_match}, Distance: {distance:.3f}, Confidence: {confidence:.1f}%")
-            
+            confidence = float(max(0.0, (1.0 - float(distance)) * 100.0))
+
+            # Normalize types to native Python for JSON serialization
+            match_py = bool(is_match)
+            confidence_py = float(round(confidence, 1))
+            distance_py = float(round(float(distance), 4))
+
+            message = f"Face {'match' if match_py else 'mismatch'} detected with {confidence_py:.1f}% confidence (distance: {distance_py:.3f})"
+
+            logger.info(f"Face comparison - Match: {match_py}, Distance: {distance_py:.3f}, Confidence: {confidence_py:.1f}%")
+
             return {
-                "match": is_match,
-                "confidence": round(confidence, 1),
-                "face_distance": round(float(distance), 4),
+                "match": match_py,
+                "confidence": confidence_py,
+                "face_distance": distance_py,
                 "message": message,
                 "error_type": None,
                 "detection_method": "YOLO+face_recognition"
