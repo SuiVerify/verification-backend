@@ -28,17 +28,31 @@ async def extract_pan_data(
     pan_ocr_service: PANOCRService = Depends(get_pan_ocr_service),
     user_service: UserService = Depends(get_user_service)
 ):
-    """Extract PAN number, name, father's name, DOB, and photo from PAN card image"""
+    """
+    Extract PAN card data from uploaded image using OCR.
+    
+    This endpoint accepts an image file from the frontend and extracts:
+    - PAN Number (AAAAA9999A format)
+    - Name (cardholder name)
+    - Father's Name
+    - Date of Birth (DD/MM/YYYY format)
+    - Photo (extracted as base64)
+    
+    The extraction uses ensemble OCR with multiple Tesseract configurations
+    for robust field extraction across different PAN card formats.
+    """
     try:
         # Validate file type
         if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid file type. Please upload an image file."
+                detail="Invalid file type. Please upload an image file (JPEG, PNG, etc.)."
             )
         
-        # Validate file size (max 10MB)
+        # Read file content
         file_content = await file.read()
+        
+        # Validate file size (max 10MB)
         if len(file_content) > 10 * 1024 * 1024:  # 10MB
             raise HTTPException(
                 status_code=400,
@@ -48,29 +62,33 @@ async def extract_pan_data(
         if len(file_content) == 0:
             raise HTTPException(
                 status_code=400,
-                detail="Empty file uploaded."
+                detail="Empty file uploaded. Please select a valid image."
             )
         
-        # Process PAN card image and extract data
-        logger.info(f"Processing PAN card image: {file.filename}")
-        result = pan_ocr_service.extract_pan_data(file_content)
+        # Process PAN card image using OCR service with ensemble mode
+        logger.info(f"📸 Processing PAN card image from frontend: {file.filename} ({len(file_content)} bytes)")
+        
+        # Call OCR service - this uses the robust extraction pipeline
+        result = pan_ocr_service.extract_pan_data(file_content, use_ensemble=True)
         
         if not result.get('success', False):
-            logger.error(f"Error processing PAN card: {result.get('error', 'Unknown error')}")
+            error_msg = result.get('error', 'Unknown OCR processing error')
+            logger.error(f"❌ PAN OCR extraction failed: {error_msg}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to process PAN card: {result.get('error', 'Unknown error')}"
+                detail=f"Failed to extract PAN card data: {error_msg}"
             )
         
-        # Extract the key fields
+        # Extract fields from OCR result
         pan_number = result.get('pan_number')
         name = result.get('name')
         father_name = result.get('father_name')
         dob = result.get('dob')
         pan_photo_base64 = result.get('pan_photo_base64')
+        raw_text = result.get('raw_text', '')
         
-        # Log extraction results
-        logger.info(f"PAN extraction results - PAN: {pan_number}, Name: {name}, DOB: {dob}")
+        # Log extraction results for monitoring
+        logger.info(f"✅ PAN OCR Success - PAN: {pan_number or 'N/A'}, Name: {name or 'N/A'}, Father: {father_name or 'N/A'}, DOB: {dob or 'N/A'}")
         
         # Prepare response data
         pan_data = PANData(
@@ -79,7 +97,7 @@ async def extract_pan_data(
             father_name=father_name,
             dob=dob,
             pan_photo_base64=pan_photo_base64,
-            raw_text=result.get('raw_text', '')
+            raw_text=raw_text[:500] if raw_text else None  # Limit raw text in response
         )
         
         # Calculate extraction success metrics
@@ -92,9 +110,17 @@ async def extract_pan_data(
         
         success_rate = (extracted_fields / 4) * 100  # 4 main fields
         
+        # Prepare detailed response message
+        if extracted_fields == 4:
+            message = "✅ All PAN card fields extracted successfully!"
+        elif extracted_fields >= 2:
+            message = f"⚠️ Partial extraction: {extracted_fields}/4 fields found. Please verify and correct if needed."
+        else:
+            message = "⚠️ Low extraction quality. Please ensure the image is clear and try again."
+        
         return APIResponse(
             success=True,
-            message=f"PAN card data extracted successfully. {extracted_fields}/4 fields found ({success_rate:.0f}% success rate).",
+            message=f"{message} (Success rate: {success_rate:.0f}%)",
             data=pan_data.dict()
         )
         

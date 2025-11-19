@@ -55,6 +55,43 @@ verification-backend/
 - **Data Validation**: Validates extracted data format and integrity
 - **Supported Fields**: Name, DOB, Gender, Phone, Address, Aadhaar Number
 
+### PAN Card OCR Integration
+
+- **Service**: PAN OCR uses Tesseract (via pytesseract) and an ensemble of preprocessing steps to robustly extract PAN card fields across formats.
+- **Supported Fields**: PAN Number, Cardholder Name, Father's Name, Date of Birth, extracted photo (base64), raw OCR text for debugging.
+- **Endpoint**: POST `/api/pan/extract-pan-data` (multipart/form-data with `file` field).
+
+Usage notes:
+- The service performs several image preprocessing strategies (contrast/brightness adjustments, adaptive thresholding, denoising) to improve OCR accuracy on varied card images.
+- The `extract_name()` logic was improved to reliably pick the cardholder's name (it prefers the line immediately before the "Father's Name" label, with robust cleanup and validation).
+- The response preserves `raw_text` (truncated in production responses) to assist debugging and monitoring.
+
+Example response (200):
+```
+{
+    "success": true,
+    "data": {
+        "pan_number": "AAAAA9999A",
+        "name": "JOHN DOE",
+        "father_name": "RICHARD DOE",
+        "dob": "01/01/1990",
+        "pan_photo_base64": "<base64>",
+        "raw_text": "..."
+    },
+    "message": "PAN data extracted successfully"
+}
+```
+
+Testing / Dev:
+- Ensure Tesseract is installed and available on PATH (Windows: install via Scoop/Installer or set `pytesseract.pytesseract.tesseract_cmd`).
+- Use `docs/PAN_OCR_Frontend_Test.html` (moved into `docs/`) for a quick browser-based upload test.
+- Use the provided scripts in `scripts/` (e.g., `extract_pan.py`) to run local tests.
+
+Edge cases & notes:
+- OCR can produce noisy text; the service implements cleaning steps and name-specific heuristics (line-before-`Father` rule, label detection, uppercase patterns).
+- For best accuracy, supply high-resolution, well-lit images and avoid heavy compression.
+- Consider adding confidence scores in the future and per-field validation rules (regex for PAN format: `^[A-Z]{5}[0-9]{4}[A-Z]$`).
+
 ### 2. Face Recognition & Verification
 - **Multi-Algorithm Support**: Uses DeepFace with multiple models
 - **High Accuracy Mode**: Advanced face matching with confidence scoring

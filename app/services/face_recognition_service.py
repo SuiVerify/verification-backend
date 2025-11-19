@@ -3,17 +3,331 @@ import base64
 import tempfile
 import logging
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
+import cv2
 
-# Import DeepFace for high accuracy face recognition
+# Import YOLO for face detection
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+    logging.warning("Ultralytics YOLO not available, falling back to OpenCV")
+
+# Import face_recognition for face encoding and comparison
+try:
+    import face_recognition
+    FACE_RECOGNITION_AVAILABLE = True
+except ImportError:
+    FACE_RECOGNITION_AVAILABLE = False
+    logging.warning("face_recognition library not available")
+
+# Import DeepFace as secondary fallback
 try:
     from deepface import DeepFace
     DEEPFACE_AVAILABLE = True
 except ImportError:
     DEEPFACE_AVAILABLE = False
-    import cv2  # Fallback to OpenCV
 
 logger = logging.getLogger(__name__)
+
+class YOLOFaceService:
+    """YOLO-based face detection and recognition service"""
+    
+    def __init__(self):
+        """Initialize YOLO face detection and face_recognition for encoding comparison"""
+        self.yolo_model = None
+        self.use_yolo = YOLO_AVAILABLE
+        self.use_face_recognition = FACE_RECOGNITION_AVAILABLE
+        
+        if YOLO_AVAILABLE:
+            try:
+                # Load YOLOv8 face detection model (will auto-download if not present)
+                # Using yolov8n.pt (nano) for faster inference, you can use yolov8s/m/l for better accuracy
+                self.yolo_model = YOLO('yolov8n.pt')
+                logger.info("✅ YOLO Face Service initialized with YOLOv8n")
+            except Exception as e:
+                logger.error(f"Failed to load YOLO model: {e}, falling back to OpenCV")
+                self.use_yolo = False
+        
+        if not self.use_yolo:
+            # Fallback to OpenCV Haar Cascade
+            self.face_cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            )
+            logger.info("Face Service initialized with OpenCV Haar Cascade fallback")
+        
+        if not FACE_RECOGNITION_AVAILABLE:
+            logger.warning("⚠️ face_recognition library not available - using basic distance metrics")
+    
+    def detect_faces_yolo(self, image: np.ndarray) -> List[Tuple[int, int, int, int]]:
+        """
+        Detect faces using YOLO model
+        Returns list of face bounding boxes as (x, y, w, h)
+        """
+        if not self.use_yolo or self.yolo_model is None:
+            return self._detect_faces_opencv(image)
+        
+        try:
+            # Run YOLO inference
+            results = self.yolo_model(image, classes=[0], verbose=False)  # class 0 = person
+            
+            faces = []
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    # Get bounding box coordinates
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = float(box.conf[0])
+                    
+                    # Filter by confidence threshold
+                    if confidence > 0.4:
+                        # Convert to (x, y, w, h) format
+                        x, y = int(x1), int(y1)
+                        w, h = int(x2 - x1), int(y2 - y1)
+                        faces.append((x, y, w, h))
+            
+            logger.info(f"YOLO detected {len(faces)} face(s)")
+            return faces
+            
+        except Exception as e:
+            logger.error(f"YOLO face detection failed: {e}, falling back to OpenCV")
+            return self._detect_faces_opencv(image)
+    
+    def _detect_faces_opencv(self, image: np.ndarray) -> List[Tuple[int, int, int, int]]:
+        """Fallback face detection using OpenCV Haar Cascade"""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, 1.1, 4)
+        logger.info(f"OpenCV detected {len(faces)} face(s)")
+        return [tuple(face) for face in faces]
+    
+    def extract_face_encoding(self, image: np.ndarray, face_location: Tuple[int, int, int, int] = None) -> Optional[np.ndarray]:
+        """
+        Extract face encoding using face_recognition library
+        face_location: (x, y, w, h) in OpenCV format
+        Returns 128-dimensional face encoding or None
+        """
+        if not FACE_RECOGNITION_AVAILABLE:
+            logger.warning("face_recognition not available, cannot extract encoding")
+            return None
+        
+        try:
+            # Convert BGR to RGB (face_recognition uses RGB)
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            if face_location:
+                # Convert OpenCV (x, y, w, h) to face_recognition format (top, right, bottom, left)
+                x, y, w, h = face_location
+                face_locations = [(y, x + w, y + h, x)]
+            else:
+                # Auto-detect face locations
+                face_locations = face_recognition.face_locations(rgb_image, model='hog')
+            
+            if not face_locations:
+                logger.warning("No face location found for encoding extraction")
+                return None
+            
+            # Extract face encoding (128-dimensional vector)
+            encodings = face_recognition.face_encodings(rgb_image, face_locations)
+            
+            if encodings:
+                logger.info(f"✅ Extracted face encoding: {encodings[0].shape}")
+                return encodings[0]
+            else:
+                logger.warning("Failed to extract face encoding")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting face encoding: {e}")
+            return None
+    
+    def compare_face_encodings(self, encoding1: np.ndarray, encoding2: np.ndarray, tolerance: float = 0.4) -> Dict:
+        """
+        Compare two face encodings and return match result with confidence
+        tolerance: Lower = more strict (default 0.6 is balanced)
+        """
+        if not FACE_RECOGNITION_AVAILABLE or encoding1 is None or encoding2 is None:
+            return {
+                "match": False,
+                "confidence": 0.0,
+                "face_distance": 1.0,
+                "message": "Cannot compare - face encoding unavailable",
+                "error_type": "ENCODING_ERROR"
+            }
+        
+        try:
+            # Calculate face distance (Euclidean distance)
+            distance = face_recognition.face_distance([encoding1], encoding2)[0]
+            
+            # Check if faces match (distance < tolerance means match)
+            is_match = bool(distance <= tolerance)
+
+            # Convert distance to confidence percentage (inverse relationship)
+            # Distance 0 = 100% confidence, Distance 1 = 0% confidence
+            confidence = float(max(0.0, (1.0 - float(distance)) * 100.0))
+            
+            # DEBUG: Log detailed comparison info
+            logger.info(f"🔍 FACE COMPARISON DEBUG:")
+            logger.info(f"  - face_distance: {distance}")
+            logger.info(f"  - tolerance: {tolerance}")
+            logger.info(f"  - is_match: {is_match} (distance <= tolerance)")
+            logger.info(f"  - confidence: {confidence}%")
+
+            # Normalize types to native Python for JSON serialization
+            match_py = bool(is_match)
+            confidence_py = float(round(confidence, 1))
+            distance_py = float(round(float(distance), 4))
+
+            message = f"Face {'match' if match_py else 'mismatch'} detected with {confidence_py:.1f}% confidence (distance: {distance_py:.3f})"
+
+            logger.info(f"Face comparison - Match: {match_py}, Distance: {distance_py:.3f}, Confidence: {confidence_py:.1f}%")
+
+            return {
+                "match": match_py,
+                "confidence": confidence_py,
+                "face_distance": distance_py,
+                "message": message,
+                "error_type": None,
+                "detection_method": "YOLO+face_recognition"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error comparing face encodings: {e}")
+            return {
+                "match": False,
+                "confidence": 0.0,
+                "face_distance": 1.0,
+                "message": f"Comparison failed: {e}",
+                "error_type": "COMPARISON_ERROR"
+            }
+    
+    def compare_faces(self, reference_image_base64: str, live_image_base64: str) -> Dict:
+        """
+        Main method to compare two faces using YOLO detection + face_recognition encoding
+        reference_image_base64: Base64 encoded reference image (e.g., from PAN card)
+        live_image_base64: Base64 encoded live/selfie image
+        """
+        try:
+            # Decode base64 images to numpy arrays
+            ref_image = self._decode_base64_image(reference_image_base64)
+            live_image = self._decode_base64_image(live_image_base64)
+            
+            if ref_image is None or live_image is None:
+                return self._error_result("Failed to decode images", "DECODE_ERROR")
+            
+            # Detect faces using YOLO
+            logger.info("🔍 Detecting faces in reference image...")
+            ref_faces = self.detect_faces_yolo(ref_image)
+            
+            logger.info("🔍 Detecting faces in live image...")
+            live_faces = self.detect_faces_yolo(live_image)
+            
+            # Validate face detection
+            if len(ref_faces) == 0:
+                return self._error_result("No face detected in reference image", "NO_FACE_REFERENCE")
+            if len(ref_faces) > 1:
+                return self._error_result(f"Multiple faces detected in reference image ({len(ref_faces)})", "MULTIPLE_FACES_REFERENCE")
+            if len(live_faces) == 0:
+                return self._error_result("No face detected in live image", "NO_FACE_LIVE")
+            if len(live_faces) > 1:
+                return self._error_result(f"Multiple faces detected in live image ({len(live_faces)})", "MULTIPLE_FACES_LIVE")
+            
+            # Extract face encodings
+            logger.info("🧬 Extracting face encoding from reference image...")
+            ref_encoding = self.extract_face_encoding(ref_image, ref_faces[0])
+            
+            logger.info("🧬 Extracting face encoding from live image...")
+            live_encoding = self.extract_face_encoding(live_image, live_faces[0])
+            
+            if ref_encoding is None or live_encoding is None:
+                return self._error_result("Failed to extract face encodings", "ENCODING_ERROR")
+            
+            # Compare encodings
+            logger.info("⚖️ Comparing face encodings...")
+            result = self.compare_face_encodings(ref_encoding, live_encoding)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in face comparison: {e}")
+            return self._error_result(f"Face comparison failed: {e}", "COMPARISON_ERROR")
+    
+    def validate_face_quality(self, image_bytes: bytes) -> Dict:
+        """Validate that image contains exactly one face"""
+        try:
+            # Convert bytes to numpy array
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img is None:
+                return {
+                    'is_valid': False,
+                    'reason': 'Failed to decode image',
+                    'error_type': 'decode_error'
+                }
+            
+            # Detect faces
+            faces = self.detect_faces_yolo(img)
+            
+            if len(faces) == 0:
+                return {
+                    'is_valid': False,
+                    'reason': 'No face detected',
+                    'error_type': 'no_face'
+                }
+            
+            if len(faces) > 1:
+                return {
+                    'is_valid': False,
+                    'reason': f'Multiple faces detected ({len(faces)})',
+                    'error_type': 'multiple_faces'
+                }
+            
+            return {
+                'is_valid': True,
+                'reason': 'Valid face detected',
+                'face_count': len(faces),
+                'detection_method': 'YOLO' if self.use_yolo else 'OpenCV'
+            }
+            
+        except Exception as e:
+            return {
+                'is_valid': False,
+                'reason': f'Validation failed: {e}',
+                'error_type': 'validation_error'
+            }
+    
+    def _decode_base64_image(self, base64_string: str) -> Optional[np.ndarray]:
+        """Decode base64 string to OpenCV image (numpy array)"""
+        try:
+            # Remove data URL prefix if present
+            if ',' in base64_string:
+                base64_string = base64_string.split(',')[1]
+            
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_string)
+            
+            # Convert bytes to numpy array
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            
+            # Decode to OpenCV image
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            return img
+            
+        except Exception as e:
+            logger.error(f"Failed to decode base64 image: {e}")
+            return None
+    
+    def _error_result(self, message: str, error_type: str) -> Dict:
+        """Standard error response"""
+        return {
+            "match": False,
+            "confidence": 0.0,
+            "face_distance": 1.0,
+            "message": message,
+            "error_type": error_type
+        }
 
 class HighAccuracyFaceService:
     def __init__(self):
@@ -330,12 +644,20 @@ class HighAccuracyFaceService:
             "error_type": error_type
         }
 
-# Singleton instance
-_face_service = None
+# Singleton instances
+_yolo_face_service = None
+_legacy_face_service = None
+
+def get_yolo_face_service() -> YOLOFaceService:
+    """Get singleton instance of YOLO-based face recognition service (PREFERRED)"""
+    global _yolo_face_service
+    if _yolo_face_service is None:
+        _yolo_face_service = YOLOFaceService()
+    return _yolo_face_service
 
 def get_face_recognition_service() -> HighAccuracyFaceService:
-    """Get singleton instance of face recognition service"""
-    global _face_service
-    if _face_service is None:
-        _face_service = HighAccuracyFaceService()
-    return _face_service
+    """Get singleton instance of legacy DeepFace service (for backward compatibility)"""
+    global _legacy_face_service
+    if _legacy_face_service is None:
+        _legacy_face_service = HighAccuracyFaceService()
+    return _legacy_face_service
